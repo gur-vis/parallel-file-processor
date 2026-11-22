@@ -1,0 +1,440 @@
+
+
+
+# STEP 1: IMPORT LIBRARIES
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import os
+import json
+import time
+import zipfile
+
+from concurrent.futures import ThreadPoolExecutor
+from IPython.display import display
+from google.colab import files
+
+print("=" * 60)
+print("       PARALLEL FILE PROCESSOR - DATA SCIENCE")
+print("=" * 60)
+
+
+# STEP 2: CREATE PROJECT FOLDERS
+
+os.makedirs("input_files", exist_ok=True)
+os.makedirs("processed_files", exist_ok=True)
+os.makedirs("visualizations", exist_ok=True)
+
+print("\nProject folders created successfully!")
+
+
+# STEP 3: CREATE SAMPLE DATASETS
+
+# Student dataset
+
+student_data = {
+    "Student_ID": [101, 102, 103, 104, 105, 106, 107, 108, 108],
+    "Name": ["Rahul", "Aman", "Vishal", "Priya", "Neha",
+             "Rohit", "Simran", "Karan", "Karan"],
+    "Age": [20, 21, 19, 22, np.nan, 21, 19, 23, 23],
+    "Marks": [85, 78, 90, 88, 76, 82, 95, 70, 70],
+    "City": ["Ludhiana", "Delhi", "Punjab", "Mumbai",
+             "Delhi", "Punjab", "Ludhiana", "Mumbai", "Mumbai"]
+}
+
+# Sales dataset
+
+sales_data = {
+    "Product": ["Laptop", "Mobile", "Tablet", "Laptop",
+                "Mobile", "Tablet", "Laptop", "Mobile"],
+    "Category": ["Electronics", "Electronics", "Electronics",
+                 "Electronics", "Electronics", "Electronics",
+                 "Electronics", "Electronics"],
+    "Price": [55000, 20000, 15000, 60000,
+              22000, 18000, 58000, 25000],
+    "Quantity": [2, 5, 3, 1, 4, 2, 3, 5],
+    "Rating": [4.5, 4.2, np.nan, 4.7, 4.1, 4.0, 4.8, 4.3]
+}
+
+# Employee dataset
+
+employee_data = {
+    "Employee_ID": [1, 2, 3, 4, 5, 6, 7, 8],
+    "Department": ["IT", "HR", "IT", "Sales",
+                   "HR", "Sales", "IT", "Finance"],
+    "Experience": [2, 5, 3, 7, 4, 6, np.nan, 8],
+    "Salary": [25000, 35000, 30000, 45000,
+               32000, 40000, 38000, 50000]
+}
+
+# Convert dictionaries into DataFrames
+
+student_df = pd.DataFrame(student_data)
+sales_df = pd.DataFrame(sales_data)
+employee_df = pd.DataFrame(employee_data)
+
+# Save datasets
+
+student_df.to_csv("input_files/students.csv", index=False)
+sales_df.to_csv("input_files/sales.csv", index=False)
+employee_df.to_csv("input_files/employees.csv", index=False)
+
+print("\nThree sample datasets created successfully!")
+
+print("\nSTUDENT DATA:")
+display(student_df.head())
+
+print("\nSALES DATA:")
+display(sales_df.head())
+
+print("\nEMPLOYEE DATA:")
+display(employee_df.head())
+
+
+# STEP 4: CREATE DATA PROCESSING FUNCTION
+
+def process_file(file_path):
+
+    start_time = time.time()
+
+    print("\nProcessing:", os.path.basename(file_path))
+
+    # Read CSV file
+    df = pd.read_csv(file_path)
+
+    # Original dataset information
+    original_rows = len(df)
+    original_columns = len(df.columns)
+
+    # Count missing values
+    missing_values = int(df.isnull().sum().sum())
+
+    # Remove duplicate records
+    duplicates = int(df.duplicated().sum())
+    df = df.drop_duplicates()
+
+    # Handle missing values
+    for column in df.columns:
+
+        if pd.api.types.is_numeric_dtype(df[column]):
+
+            median_value = df[column].median()
+
+            if pd.notna(median_value):
+                df[column] = df[column].fillna(median_value)
+            else:
+                df[column] = df[column].fillna(0)
+
+        else:
+
+            mode_value = df[column].mode()
+
+            if len(mode_value) > 0:
+                df[column] = df[column].fillna(mode_value.iloc[0])
+            else:
+                df[column] = df[column].fillna("Unknown")
+
+    # Select numeric columns
+    numeric_data = df.select_dtypes(include=np.number)
+
+    # Calculate statistical analysis
+    statistics = {}
+
+    for column in numeric_data.columns:
+
+        statistics[column] = {
+            "Mean": round(float(numeric_data[column].mean()), 2),
+            "Median": round(float(numeric_data[column].median()), 2),
+            "Minimum": round(float(numeric_data[column].min()), 2),
+            "Maximum": round(float(numeric_data[column].max()), 2),
+            "Standard Deviation": round(
+                float(numeric_data[column].std()), 2
+            )
+        }
+
+    # Calculate categorical analysis
+    categories = {}
+
+    for column in df.select_dtypes(include="object").columns:
+
+        categories[column] = (
+            df[column].value_counts().head(5).to_dict()
+        )
+
+    # Save cleaned file
+    file_name = os.path.basename(file_path)
+
+    output_path = os.path.join(
+        "processed_files",
+        "cleaned_" + file_name
+    )
+
+    df.to_csv(output_path, index=False)
+
+    # Processing time
+    processing_time = round(time.time() - start_time, 4)
+
+    # Prepare result
+    result = {
+        "File Name": file_name,
+        "Original Rows": original_rows,
+        "Cleaned Rows": len(df),
+        "Columns": original_columns,
+        "Missing Values": missing_values,
+        "Duplicates Removed": duplicates,
+        "Processing Time": processing_time,
+        "Statistics": statistics,
+        "Categories": categories
+    }
+
+    print("Completed:", file_name)
+
+    return df, result
+
+
+# STEP 5: PARALLEL PROCESSING
+
+print("\n" + "=" * 60)
+print("STARTING PARALLEL FILE PROCESSING")
+print("=" * 60)
+
+file_paths = [
+    os.path.join("input_files", file)
+    for file in os.listdir("input_files")
+    if file.endswith(".csv")
+]
+
+processed_results = []
+
+start_parallel = time.time()
+
+# Process multiple files simultaneously
+
+with ThreadPoolExecutor(max_workers=3) as executor:
+
+    results = list(executor.map(process_file, file_paths))
+
+parallel_time = round(time.time() - start_parallel, 4)
+
+# Separate cleaned DataFrames and reports
+
+cleaned_dataframes = {}
+
+for df, report in results:
+
+    cleaned_dataframes[report["File Name"]] = df
+
+    processed_results.append(report)
+
+print("\nAll files processed successfully!")
+
+print("Total files:", len(processed_results))
+print("Total parallel processing time:", parallel_time, "seconds")
+
+
+# STEP 6: DISPLAY FINAL PROCESSING REPORT
+
+summary_data = []
+
+for result in processed_results:
+
+    summary_data.append({
+        "File": result["File Name"],
+        "Original Rows": result["Original Rows"],
+        "Cleaned Rows": result["Cleaned Rows"],
+        "Missing Values": result["Missing Values"],
+        "Duplicates Removed": result["Duplicates Removed"],
+        "Processing Time": result["Processing Time"]
+    })
+
+summary_df = pd.DataFrame(summary_data)
+
+print("\nFINAL PROCESSING REPORT")
+
+display(summary_df)
+
+
+# STEP 7: DISPLAY STATISTICAL ANALYSIS
+
+for result in processed_results:
+
+    print("\nFILE:", result["File Name"])
+
+    print("-" * 45)
+
+    for column, values in result["Statistics"].items():
+
+        print("\nColumn:", column)
+
+        for statistic, value in values.items():
+
+            print(statistic, ":", value)
+
+
+# STEP 8: DATA VISUALIZATION - STUDENT MARKS
+
+clean_students = cleaned_dataframes["students.csv"]
+
+plt.figure(figsize=(10, 5))
+
+sns.barplot(
+    data=clean_students,
+    x="Name",
+    y="Marks"
+)
+
+plt.title("Student Marks Analysis")
+plt.xlabel("Student Name")
+plt.ylabel("Marks")
+plt.xticks(rotation=30)
+
+plt.tight_layout()
+plt.savefig("visualizations/student_marks.png")
+plt.show()
+
+
+# STEP 9: SALES DATA VISUALIZATION
+
+clean_sales = cleaned_dataframes["sales.csv"]
+
+plt.figure(figsize=(9, 5))
+
+sns.barplot(
+    data=clean_sales,
+    x="Product",
+    y="Price"
+)
+
+plt.title("Product Price Analysis")
+plt.xlabel("Product")
+plt.ylabel("Price")
+
+plt.tight_layout()
+plt.savefig("visualizations/sales_analysis.png")
+plt.show()
+
+
+# STEP 10: EMPLOYEE SALARY ANALYSIS
+
+clean_employees = cleaned_dataframes["employees.csv"]
+
+plt.figure(figsize=(9, 5))
+
+sns.barplot(
+    data=clean_employees,
+    x="Department",
+    y="Salary",
+    estimator=np.mean
+)
+
+plt.title("Average Salary by Department")
+plt.xlabel("Department")
+plt.ylabel("Average Salary")
+
+plt.tight_layout()
+plt.savefig("visualizations/employee_salary.png")
+plt.show()
+
+
+# STEP 11: CORRELATION HEATMAP
+
+plt.figure(figsize=(8, 5))
+
+sns.heatmap(
+    clean_students.select_dtypes(include=np.number).corr(),
+    annot=True,
+    cmap="coolwarm"
+)
+
+plt.title("Student Data Correlation")
+
+plt.tight_layout()
+plt.savefig("visualizations/correlation_heatmap.png")
+plt.show()
+
+
+# STEP 12: COMPARISON OF MEAN AND MEDIAN
+
+print("\nSTUDENT MARKS STATISTICS")
+
+print("Mean:", clean_students["Marks"].mean())
+
+print("Median:", clean_students["Marks"].median())
+
+print("Maximum:", clean_students["Marks"].max())
+
+print("Minimum:", clean_students["Marks"].min())
+
+print("Standard Deviation:", clean_students["Marks"].std())
+
+
+# STEP 13: SAVE FINAL JSON REPORT
+
+report_path = "processed_files/final_analysis_report.json"
+
+with open(report_path, "w") as file:
+
+    json.dump(processed_results, file, indent=4)
+
+print("\nJSON report saved successfully!")
+
+
+# STEP 14: SAVE SUMMARY CSV
+
+summary_df.to_csv(
+    "processed_files/processing_summary.csv",
+    index=False
+)
+
+print("Summary CSV saved successfully!")
+
+
+# STEP 15: CREATE COMPLETE PROJECT ZIP FILE
+
+zip_name = "Parallel_File_Processor_Project.zip"
+
+with zipfile.ZipFile(zip_name, "w", zipfile.ZIP_DEFLATED) as zip_file:
+
+    for folder in ["input_files", "processed_files", "visualizations"]:
+
+        for root, dirs, filenames in os.walk(folder):
+
+            for filename in filenames:
+
+                file_path = os.path.join(root, filename)
+
+                zip_file.write(file_path)
+
+
+# STEP 16: FINAL OUTPUT
+
+print("\n" + "=" * 60)
+print("          PROJECT COMPLETED SUCCESSFULLY")
+print("=" * 60)
+
+print("Project Name: Parallel File Processor")
+
+print("Domain: Data Science")
+
+print("Programming Language: Python")
+
+print("Total Files Processed:", len(processed_results))
+
+print("Total Processing Time:", parallel_time, "seconds")
+
+print("\nGenerated Outputs:")
+
+print("1. Cleaned CSV Files")
+print("2. Statistical Analysis")
+print("3. Data Visualization")
+print("4. Correlation Heatmap")
+print("5. JSON Analysis Report")
+print("6. Processing Summary CSV")
+print("7. Complete Project ZIP")
+
+print("\nThank You!")
+
+# Download complete project
+files.download(zip_name)
